@@ -175,12 +175,16 @@ def build_index(in_dir, out_dict, out_postings):
                 doc_text = doc_open.read()
 
             sentences = nltk.sent_tokenize(doc_text)
+
             processed_document = []
             for s in sentences:
                 words = nltk.word_tokenize(s)
 
-                # remove stop words and case-fold all word tokens, then porter-stem the word
-                processed_document.append([normalize_token(token) for token in words if token not in STOP_WORDS])
+                # case-fold all word tokens, then porter-stem the word
+                processed_document.append([normalize_token(token) for token in words])
+
+                # This line was previously used when we also deleted stop words
+                # [...].append([normalize_token(token) for token in words if token.lower() not in STOP_WORDS])
 
             for sentence in processed_document:
                 for token in sentence:
@@ -202,6 +206,7 @@ def build_index(in_dir, out_dict, out_postings):
                             # bisect is a built-in module. Uses binary search [O(log n)] to
                             # insert element into a sorted list.
                             bisect.insort(block_postings[tokens_term_id], doc_id)
+
 
         for term, terms_postings in block_postings.items():
             posting_list = PostingList()
