@@ -1,0 +1,7 @@
+good AND bad
+sweden AND norway AND (finland OR denmark)
+(sweden AND norway AND finland) OR denmark
+bill OR Gates AND (vista OR XP) AND NOT mac
+
+
+(((bill or gate) and vista) AND xp) AND NOT mac
