@@ -226,18 +226,6 @@ def build_index(in_dir, out_dict, out_postings):
         pickle.dump(term_to_term_id, term_conversion)
         pickle.dump(term_id_to_term, term_conversion)
 
-    merged_dictionary = {}
-
-    # need to open and keep open for pickle.load() to remember what have been read
-    read_dict = open(out_dict, 'rb')
-    for _ in range(NUMBER_OF_BLOCKS):
-        to_merge_dictionary = pickle.load(read_dict)
-        merged_dictionary = merge_dict(merged_dictionary, to_merge_dictionary)
-
-    read_dict.close()
-    with open(out_dict, 'wb') as write_dict:
-        pickle.dump(merged_dictionary, write_dict)
-
     merged_postings = {}
     read_postings = open(out_postings, 'rb')
     for _ in range(NUMBER_OF_BLOCKS):
@@ -247,23 +235,37 @@ def build_index(in_dir, out_dict, out_postings):
 
     read_postings.close()
 
+    merged_dictionary = {}
+    # need to open and keep open for pickle.load() to remember what have been read
+    read_dict = open(out_dict, 'rb')
+    for _ in range(NUMBER_OF_BLOCKS):
+        to_merge_dictionary = pickle.load(read_dict)
+        merged_dictionary = merge_dict(merged_dictionary, to_merge_dictionary)
+    read_dict.close()
+
     max_length = 0
     max_term_id = 0
 
-    for term_id, posting_list in merged_postings.items():
-        if posting_list.length > max_length:
-            max_length = posting_list.length
-            max_term_id = term_id
+    with open(out_postings, 'wb') as write_postings:
+        for term_id, posting_list in merged_postings.items():
+            if posting_list.length > max_length:
+                max_length = posting_list.length
+                max_term_id = term_id
 
-        number_of_skips = math.sqrt(posting_list.length)
-        skip_distance = math.floor(posting_list.length / number_of_skips)
-        if skip_distance > 1:
-            posting_list.add_skip_ptr(posting_list.head, skip_distance)
+            number_of_skips = math.sqrt(posting_list.length)
+            skip_distance = math.floor(posting_list.length / number_of_skips)
+            if skip_distance > 1:
+                posting_list.add_skip_ptr(posting_list.head, skip_distance)
+
+            writer_position = write_postings.tell()
+            pickle.dump(merged_postings[term_id], write_postings)
+            # every term_id in the dictionary will be a tuple of (doc_frequency, writer offset)
+            merged_dictionary[term_id] = (merged_dictionary[term_id], writer_position)
 
     print(f'Maximum length posting list is {max_length} long. It is the word {term_id_to_term[max_term_id]}.')
 
-    with open(out_postings, 'wb') as write_postings:
-        pickle.dump(merged_postings, write_postings)
+    with open(out_dict, 'wb') as write_dict:
+        pickle.dump(merged_dictionary, write_dict)
 
 
 input_directory = output_file_dictionary = output_file_postings = None
