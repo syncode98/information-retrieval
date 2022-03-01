@@ -6,10 +6,14 @@ import sys
 import getopt
 
 OPERATORS = ["NOT", "AND", "OR"]
-PRECEDENCE_DICT = {"NOT":3, "AND":2, "OR":1}  # the precedence order for not, and, or.
+PRECEDENCE_DICT = {"NOT": 3, "AND": 2, "OR": 1}  # the precedence order for not, and, or.
 PORTER_STEMMER = nltk.stem.porter.PorterStemmer()
 STOP_WORDS = set(nltk.corpus.stopwords.words('english') + [".", ",", ";", ":"])
 NUMBER_OF_BLOCKS = 10
+
+with open('term_conversion.txt', 'rb') as read_term_converter:
+    term_to_term_id = pickle.load(read_term_converter)  # term (str) -> term id (int, 4 bytes)
+    term_id_to_term = pickle.load(read_term_converter)  # term id (int, 4 bytes) -> term (str)
 
 
 class Posting:
@@ -38,7 +42,7 @@ class PostingList:
             current_node.next = Posting(posting_doc_id)
             current_node = current_node.next
 
-    def sortedMerge(self, a, b):
+    def or_merge(self, a, b):
         result = None
 
         # Base cases
@@ -50,10 +54,121 @@ class PostingList:
         # Pick either a or b, and recur
         if a.doc_id <= b.doc_id:
             result = a
-            result.next = self.sortedMerge(a.next, b)
+            result.next = self.or_merge(a.next, b)
         else:
             result = b
-            result.next = self.sortedMerge(a, b.next)
+            result.next = self.or_merge(a, b.next)
+
+        return result
+
+    def and_merge(self, a, b):
+        result = None
+
+        # Base case. An AND operation always return null if one of the lists are empty
+        if a is None or b is None:
+            return None
+
+        if a.doc_id == b.doc_id:
+            # if the two postings are the same, it should (hopefully) not matter which one we choose to add to our list
+            result = a
+            result.next = self.and_merge(a.next, b)
+
+        elif a.doc_id < b.doc_id:
+            if a.next is None:
+                return None
+            # we only use the skip ptr if it gets us closer to the larger doc_id of b
+            if a.skip is not None and b.doc_id - a.skip.doc_id >= 0:
+                result = self.and_merge(a.skip, b)
+            else:
+                result = self.and_merge(a.next, b)
+
+        elif a.doc_id > b.doc_id:
+            if b.next is None:
+                return None
+            # we only use the skip ptr if it gets us closer to the larger doc_id of a
+            if b.skip is not None and a.doc_id - b.skip.doc_id >= 0:
+                result = self.and_merge(a, b.skip)
+            else:
+                result = self.and_merge(a, b.next)
+
+        return result
+
+    def find_first_non_match(self, a, b):
+        print(f'Comparing {a} with {b}')
+        if b.doc_id > a.doc_id:
+            print(f'We settle for {a}')
+            return a, a.next
+        if b.doc_id < a.doc_id:
+            if b.next is None:
+                return a, a.next
+            else:
+                return self.find_first_non_match(a, b.next)
+        else:
+            return self.find_first_non_match(a.next, b.next)
+
+    def and_not_merge(self, a, b, prev=None):
+        # base cases
+        if b is None:
+            return a
+        if a is None:
+            return None
+
+        result = None
+
+        print(f'A: {a}, B: {b}')
+
+        if a.doc_id == b.doc_id:
+            # if the two postings are the same, we do not set this node, instead we set it to the next
+
+            print(f'ITS A MATCH: {a.doc_id}')
+
+            if a.next is None:
+                return None
+
+            print(f'Prev {prev}')
+            if prev:
+                # our idea is to skip the current node (a) by
+                # setting the previous node's next to the node in front of a.
+                prev.next, restart_node = self.find_first_non_match(a.next, b)
+
+                result = prev.next
+
+                print(f'We found {prev} -> {result} is safe')
+                print(f'Starting process from {restart_node} again, also {b} and {result}')
+
+                result.next = self.and_not_merge(restart_node, b, result)
+
+            else:
+                # only if this was the very first entry, otherwise we always have a "prev"
+
+                prev, restart_node = self.find_first_non_match(a.next, b)
+
+                result = prev
+
+                result.next = self.and_not_merge(restart_node, b, result)
+
+                print(f'We changed None to {result}')
+
+
+            print(f'Is now linked to {result}')
+
+        elif a.doc_id < b.doc_id:
+            if a.next is None:
+                return a
+            # we only use the skip ptr if it gets us closer to the larger doc_id of b
+            if a.skip is not None and b.doc_id - a.skip.doc_id >= 0:
+                result = self.and_not_merge(a.skip, b, a)
+            else:
+                result = self.and_not_merge(a.next, b, a)
+
+        elif a.doc_id > b.doc_id:
+            if b.next is None:
+                return a
+            # we only use the skip ptr if it gets us closer to the larger doc_id of a
+            if b.skip is not None and a.doc_id - b.skip.doc_id >= 0:
+                result = self.and_not_merge(a, b.skip, a)
+            else:
+                result = self.and_not_merge(a, b.next, a)
 
         return result
 
@@ -88,20 +203,52 @@ class PostingList:
 
     def __repr__(self):
         node = self.head
-        nodes = ['len' + str(self.length)]
+        nodes = []
         while node is not None:
-            nodes.append(str(node))
+            nodes.append(str(node.doc_id))
             node = node.next
-        nodes.append("None")
-        return " -> ".join(nodes)
+        return " ".join(nodes)
+
 
 def usage():
     print("usage: " + sys.argv[0] + " -d dictionary-file -p postings-file -q file-of-queries -o output-file-of-results")
+
+
+def or_operation(listA, listB):
+    """
+    This is the same as a merge between the two posting lists. We are looking for the union of two linked lists.
+    """
+    merged_postings = PostingList()
+    merged_postings.head = merged_postings.or_merge(listA.head, listB.head)
+
+    return merged_postings
+
+
+def and_operation(listA, listB):
+    """
+    This is the same as looking for the intersection of two linked lists.
+    """
+    merged_postings = PostingList()
+    merged_postings.head = merged_postings.and_merge(listA.head, listB.head)
+
+    return merged_postings
+
+
+def and_not_operation(listA, listB):
+    """
+    The listA And-Not listB operation is the same as taking ListA - {all elements in listB}
+    """
+    merged_postings = PostingList()
+    merged_postings.head = merged_postings.and_not_merge(listA.head, listB.head)
+
+    return merged_postings
+
 
 def normalize_token(token):
     token = token.lower()  # case folding
     token = PORTER_STEMMER.stem(token)  # porter-stemming
     return token
+
 
 def shunting_yard(q):
     # while there are tokens to read
@@ -117,7 +264,7 @@ def shunting_yard(q):
     for token in tokens:
         if token in OPERATORS:
             while len(operator_stack) > 0 and operator_stack[-1] != '(' \
-                    and PRECEDENCE_DICT[operator_stack[-1]] > PRECEDENCE_DICT[token]:
+                    and PRECEDENCE_DICT[operator_stack[-1]] >= PRECEDENCE_DICT[token]:
                 output_q.append(operator_stack.pop())
             operator_stack.append(token)
 
@@ -129,9 +276,9 @@ def shunting_yard(q):
                 if len(operator_stack) < 1:
                     raise "MismatchError"
                 output_q.append(operator_stack.pop())
-            operator_stack.pop()    # pop the left parenthesis from the stack and discard it
+            operator_stack.pop()  # pop the left parenthesis from the stack and discard it
 
-        else:   # token must be a search term
+        else:  # token must be a search term
             output_q.append(normalize_token(token))
 
     while len(operator_stack) > 0:
@@ -144,7 +291,24 @@ def shunting_yard(q):
 
 def process_query(q):
     postix_q = shunting_yard(q)
-    print(postix_q)
+    return postix_q
+
+
+def retrieve_postings_list(dictionary, term_id):
+    with open(postings_file, 'rb') as read_postings:
+        reader_offset = dictionary[term_id][1]
+        read_postings.seek(reader_offset)
+        return pickle.load(read_postings)
+
+
+def search_term(term_to_search, dictionary):
+    searched_term = normalize_token(term_to_search)
+    try:
+        term_id = term_to_term_id[searched_term]
+    except KeyError:
+        return None
+
+    return retrieve_postings_list(dictionary, term_id)
 
 
 def run_search(dict_file, postings_file, queries_file, results_file):
@@ -152,34 +316,69 @@ def run_search(dict_file, postings_file, queries_file, results_file):
     using the given dictionary file and postings file,
     perform searching on the given queries file and output the results to a file
     """
-
-    ##########
-    with open(queries_file, 'r') as queries:
-        for query in queries:
-            process_query(query)    # Process this query
-
-    ##########
-
-    with open('term_conversion.txt', 'rb') as read_term_converter:
-        term_to_term_id = pickle.load(read_term_converter)    # term (str) -> term id (int, 4 bytes)
-        #term_id_to_term = pickle.load(read_term_converter)    # term id (int, 4 bytes) -> term (str)
-
+    print('running search on the queries...')
 
     with open(dict_file, 'rb') as read_dict:
         # We are able to read the full dictionary into memory
+        # The dictionary is structured as - term_id : (doc_freq, file_offset)
         dictionary = pickle.load(read_dict)
 
-    print(len(dictionary.keys()))
+    # create / wipe the results file before we start handling the queries
+    open(results_file, 'w').close()
 
-    # This is not correct code, we should not read everything, instead, rely on pointers.
-    with open(postings_file, 'rb') as read_postings:
-        postings = pickle.load(read_postings)
+    with open(queries_file, 'r') as queries:
+        for query in queries:
+            RPN = process_query(query)  # Process this query
+            print(RPN)
 
-    print(postings[term_to_term_id['said']])
+            prev_list = None
+            exec_queue = []
 
-    print('running search on the queries...')
-    # This is an empty method
-    # Pls implement your code in below
+            i = 0
+            while i < len(RPN):
+                term = RPN[i]
+                if term in OPERATORS:
+
+                    if prev_list is None:
+                        prev_list = search_term(exec_queue.pop(0), dictionary)
+
+                    second_list = search_term(exec_queue.pop(0), dictionary)
+
+                    on_last_index = i + 1 == len(RPN)
+
+                    print(prev_list)
+                    print("DIVIDER")
+                    print(second_list)
+
+                    if term == 'NOT':
+                        if not on_last_index:
+                            if RPN[i + 1] == 'AND':
+                                prev_list = and_not_operation(prev_list, second_list)
+                                print("DIVIDER 2")
+                                print(prev_list)
+                                i += 1
+                            elif RPN[i + 1] == 'OR':
+                                print("IMPLEMENT OR")
+                            else:
+                                print("I DON'T KNOW")
+                        else:
+                            print("IMPLEMENT PLAIN NOT SEARCH")
+
+                    elif term == 'AND':
+                        prev_list = and_operation(prev_list, second_list)
+                    elif term == 'OR':
+                        prev_list = or_operation(prev_list, second_list)
+
+                else:
+                    exec_queue.append(term)
+                i += 1
+
+            if exec_queue:
+                prev_list = search_term(exec_queue.pop(0), dictionary)
+
+            with open(results_file, 'a') as write_res:
+                write_res.write(str(prev_list) + '\n')
+
 
 dictionary_file = postings_file = file_of_queries = output_file_of_results = None
 
@@ -191,7 +390,7 @@ except getopt.GetoptError:
 
 for o, a in opts:
     if o == '-d':
-        dictionary_file  = a
+        dictionary_file = a
     elif o == '-p':
         postings_file = a
     elif o == '-q':
@@ -201,7 +400,7 @@ for o, a in opts:
     else:
         assert False, "unhandled option"
 
-if dictionary_file == None or postings_file == None or file_of_queries == None or file_of_output == None :
+if dictionary_file == None or postings_file == None or file_of_queries == None or file_of_output == None:
     usage()
     sys.exit(2)
 
