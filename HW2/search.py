@@ -43,6 +43,10 @@ class PostingList:
             current_node = current_node.next
 
     def or_merge(self, a, b):
+        """
+        This is the same as a merge between the two posting lists. We are looking for the union of two linked lists.
+        Time Complexity: O(x+y)
+        """
         result = None
 
         # Base cases
@@ -62,6 +66,10 @@ class PostingList:
         return result
 
     def and_merge(self, a, b):
+        """
+        This is the same as looking for the intersection of two linked lists.
+        Time Complexity: O(x+y)
+        """
         result = None
 
         # Base case. An AND operation always return null if one of the lists are empty
@@ -94,9 +102,9 @@ class PostingList:
         return result
 
     def find_first_non_match(self, a, b):
-        print(f'Comparing {a} with {b}')
+        # print(f'Comparing {a} with {b}')
         if b.doc_id > a.doc_id:
-            print(f'We settle for {a}')
+            # print(f'We settle for {a}')
             return a, a.next
         if b.doc_id < a.doc_id:
             if b.next is None:
@@ -107,6 +115,11 @@ class PostingList:
             return self.find_first_non_match(a.next, b.next)
 
     def and_not_merge(self, a, b, prev=None):
+        """
+        The listA And-Not listB operation is the same as taking ListA - {all elements in listB}
+        Time Complexity: O(x+y)
+        """
+
         # base cases
         if b is None:
             return a
@@ -115,17 +128,14 @@ class PostingList:
 
         result = None
 
-        print(f'A: {a}, B: {b}')
+        # print(f'A: {a}, B: {b}')
 
         if a.doc_id == b.doc_id:
             # if the two postings are the same, we do not set this node, instead we set it to the next
 
-            print(f'ITS A MATCH: {a.doc_id}')
-
             if a.next is None:
                 return None
 
-            print(f'Prev {prev}')
             if prev:
                 # our idea is to skip the current node (a) by
                 # setting the previous node's next to the node in front of a.
@@ -133,20 +143,18 @@ class PostingList:
 
                 result = prev.next
 
-                print(f'We found {prev} -> {result} is safe')
-                print(f'Starting process from {restart_node} again, also {b} and {result}')
+                # print(f'We found {prev} -> {result} is safe')
+                # print(f'Starting process from {restart_node} again, also {b} and {result}')
 
                 result.next = self.and_not_merge(restart_node, b, result)
 
             else:
-                # only if this was the very first entry, otherwise we always have a "prev"
+                # only if this was the very first posting in listA, otherwise we always have a "prev"
                 prev, restart_node = self.find_first_non_match(a.next, b)
                 result = prev
                 result.next = self.and_not_merge(restart_node, b, result)
 
-                print(f'We changed None to {result}')
-
-            print(f'Is now linked to {result}')
+            # print(f'{prev} is now linked to {result} instead of {a} == {b}')
 
         elif a.doc_id < b.doc_id:
             if a.next is None:
@@ -213,34 +221,23 @@ def usage():
     print("usage: " + sys.argv[0] + " -d dictionary-file -p postings-file -q file-of-queries -o output-file-of-results")
 
 
-def or_operation(listA, listB):
-    """
-    This is the same as a merge between the two posting lists. We are looking for the union of two linked lists.
-    """
-    merged_postings = PostingList()
-    merged_postings.head = merged_postings.or_merge(listA.head, listB.head)
+def exec_operation(listA, listB, operation):
+    resulting_postings = PostingList()
 
-    return merged_postings
+    if operation == 'AND':
+        resulting_postings.head = resulting_postings.and_merge(listA.head, listB.head)
+    elif operation == 'OR':
+        resulting_postings.head = resulting_postings.or_merge(listA.head, listB.head)
+    elif operation == 'ANDNOT':
+        resulting_postings.head = resulting_postings.and_not_merge(listA.head, listB.head)
+    elif operation == 'ORNOT':
+        print(f'This operation is not yet implemented')
+    elif operation == 'NOT':
+        print(f'This operation is not yet implemented')
+    else:
+        print(f'Invalid operation: {operation}')
 
-
-def and_operation(listA, listB):
-    """
-    This is the same as looking for the intersection of two linked lists.
-    """
-    merged_postings = PostingList()
-    merged_postings.head = merged_postings.and_merge(listA.head, listB.head)
-
-    return merged_postings
-
-
-def and_not_operation(listA, listB):
-    """
-    The listA And-Not listB operation is the same as taking ListA - {all elements in listB}
-    """
-    merged_postings = PostingList()
-    merged_postings.head = merged_postings.and_not_merge(listA.head, listB.head)
-
-    return merged_postings
+    return resulting_postings
 
 
 def normalize_token(token):
@@ -263,7 +260,7 @@ def shunting_yard(q):
     for token in tokens:
         if token in OPERATORS:
             while len(operator_stack) > 0 and operator_stack[-1] != '(' \
-                    and PRECEDENCE_DICT[operator_stack[-1]] > PRECEDENCE_DICT[token]:
+                    and PRECEDENCE_DICT[operator_stack[-1]] >= PRECEDENCE_DICT[token]:
                 output_q.append(operator_stack.pop())
             operator_stack.append(token)
 
@@ -328,7 +325,7 @@ def run_search(dict_file, postings_file, queries_file, results_file):
     with open(queries_file, 'r') as queries:
         for query in queries:
             RPN = process_query(query)  # Process this query
-            print(RPN)
+            print(f'Searching for query: {query} which is translated to RPN: {RPN}')
 
             prev_list = None
             exec_queue = []
@@ -337,36 +334,31 @@ def run_search(dict_file, postings_file, queries_file, results_file):
             while i < len(RPN):
                 term = RPN[i]
                 if term in OPERATORS:
-
                     if prev_list is None:
                         prev_list = search_term(exec_queue.pop(0), dictionary)
 
                     second_list = search_term(exec_queue.pop(0), dictionary)
 
                     on_last_index = i + 1 == len(RPN)
-
-                    print(prev_list)
-                    print("DIVIDER")
-                    print(second_list)
-
                     if term == 'NOT':
                         if not on_last_index:
                             if RPN[i + 1] == 'AND':
-                                prev_list = and_not_operation(prev_list, second_list)
-                                print("DIVIDER 2")
-                                print(prev_list)
+                                # exec "term1 AND NOT term2"
+                                prev_list = exec_operation(prev_list, second_list, 'ANDNOT')
                                 i += 1
                             elif RPN[i + 1] == 'OR':
+                                # exec "term1 OR NOT term2"
                                 print("IMPLEMENT OR")
                             else:
                                 print("I DON'T KNOW")
                         else:
+                            # exec "NOT term1"
                             print("IMPLEMENT PLAIN NOT SEARCH")
 
                     elif term == 'AND':
-                        prev_list = and_operation(prev_list, second_list)
+                        prev_list = exec_operation(prev_list, second_list, 'AND')
                     elif term == 'OR':
-                        prev_list = or_operation(prev_list, second_list)
+                        prev_list = exec_operation(prev_list, second_list, 'OR')
 
                 else:
                     exec_queue.append(term)
