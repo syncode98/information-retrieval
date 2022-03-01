@@ -207,7 +207,6 @@ def build_index(in_dir, out_dict, out_postings):
                             # insert element into a sorted list.
                             bisect.insort(block_postings[tokens_term_id], doc_id)
 
-
         for term, terms_postings in block_postings.items():
             posting_list = PostingList()
             posting_list.add_first(Posting(terms_postings[0]))
@@ -235,7 +234,12 @@ def build_index(in_dir, out_dict, out_postings):
     read_postings = open(out_postings, 'rb')
     for _ in range(NUMBER_OF_BLOCKS):
         to_merge_postings = pickle.load(read_postings)
+        # open block0
         merged_postings = merge_posting_dict(merged_postings, to_merge_postings)
+        # open block 1
+        # block x
+        # open block 2
+        # merge block x and block 2
         print(f'Done with merging block (0 -> {_}) and {_ + 1}')
 
     read_postings.close()

@@ -140,15 +140,11 @@ class PostingList:
 
             else:
                 # only if this was the very first entry, otherwise we always have a "prev"
-
                 prev, restart_node = self.find_first_non_match(a.next, b)
-
                 result = prev
-
                 result.next = self.and_not_merge(restart_node, b, result)
 
                 print(f'We changed None to {result}')
-
 
             print(f'Is now linked to {result}')
 
@@ -156,10 +152,13 @@ class PostingList:
             if a.next is None:
                 return a
             # we only use the skip ptr if it gets us closer to the larger doc_id of b
+
+            result = a
+
             if a.skip is not None and b.doc_id - a.skip.doc_id >= 0:
-                result = self.and_not_merge(a.skip, b, a)
+                result.next = self.and_not_merge(a.skip, b, a)
             else:
-                result = self.and_not_merge(a.next, b, a)
+                result.next = self.and_not_merge(a.next, b, a)
 
         elif a.doc_id > b.doc_id:
             if b.next is None:
@@ -264,7 +263,7 @@ def shunting_yard(q):
     for token in tokens:
         if token in OPERATORS:
             while len(operator_stack) > 0 and operator_stack[-1] != '(' \
-                    and PRECEDENCE_DICT[operator_stack[-1]] >= PRECEDENCE_DICT[token]:
+                    and PRECEDENCE_DICT[operator_stack[-1]] > PRECEDENCE_DICT[token]:
                 output_q.append(operator_stack.pop())
             operator_stack.append(token)
 
