@@ -170,6 +170,17 @@ def build_index(in_dir, out_dict, out_postings):
         block_dictionary = {}  # term_id -> document frequency of term
         block_postings = {}  # term_id -> posting[0] -> posting[1] ...
 
+        if block_number == NUMBER_OF_BLOCKS - 1:   # if it is the very last block
+            # Add a special entry that has a list of ALL postings.
+            # It is later used for handling some "NOT" queries.
+            token = 'all_documents_combined'
+            term_to_term_id[token] = term_id
+            term_id_to_term[term_id] = token
+            # the document frequency of this term is nil, since it should never appear in any document
+            block_dictionary[term_id] = 0
+            block_postings[term_id] = sorted(all_documents)
+            term_id += 1
+
         for doc_id in block:
             with open(os.path.join(in_dir, str(doc_id)), 'r') as doc_open:
                 doc_text = doc_open.read()
@@ -234,12 +245,7 @@ def build_index(in_dir, out_dict, out_postings):
     read_postings = open(out_postings, 'rb')
     for _ in range(NUMBER_OF_BLOCKS):
         to_merge_postings = pickle.load(read_postings)
-        # open block0
         merged_postings = merge_posting_dict(merged_postings, to_merge_postings)
-        # open block 1
-        # block x
-        # open block 2
-        # merge block x and block 2
         print(f'Done with merging block (0 -> {_}) and {_ + 1}')
 
     read_postings.close()
