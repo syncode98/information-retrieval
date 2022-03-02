@@ -42,6 +42,50 @@ class PostingList:
             current_node.next = Posting(posting_doc_id)
             current_node = current_node.next
 
+    def alt_or_merge(self, a, b):
+        head_a = a
+        while a is not None and a.next is not None:
+            print(f'A: {a}, B: {b}')
+            if a.doc_id == b.doc_id:
+                # in this case, we want to break the tie in favor of the posting that have the
+                # lowest numbered next posting
+
+                c = a
+                d = b
+                tie_broken = False
+                while not tie_broken:
+                    a_next = c.next.doc_id if c.next is not None else 0
+                    b_next = d.next.doc_id if d.next is not None else 0
+
+                    result = a  # does not matter which one of a or b we pick
+                    if a_next < b_next:
+                        a = a.next  # continue the forward traversal of the lists
+                        tie_broken = True
+                    elif a_next > b_next:
+                        a = b.next  # continue the forward traversal of the lists
+                        tie_broken = True
+                    else:
+                        c = a.next
+                        d = b.next
+
+            elif a.doc_id < b.doc_id:
+
+                # if this is the case, then we check if we can use the skip ptr or not.
+                if a.skip is not None and b.doc_id - a.skip.doc_id >= 0:
+                    prev_skip = a  # if we use the skip pointer, we remember where we skipped from.
+                    # "With great power comes great responsibility."
+                    a = a.skip  # traverse forward using the skip pointer
+                else:
+                    a = a.next
+
+            elif a.doc_id > b.doc_id:
+                if b.skip is not None and a.doc_id - b.skip.doc_id >= 0:
+                    b = b.skip
+                else:
+                    b = b.next  # traverse forward in b's postings
+
+        return head_a
+
     def or_merge(self, a, b):
         """
         This is the same as a merge between the two posting lists. We are looking for the union of two linked lists.
@@ -56,12 +100,28 @@ class PostingList:
             return a
 
         # Pick either a or b, and recur
-        if a.doc_id <= b.doc_id:
+        if a.doc_id < b.doc_id:
             result = a
             result.next = self.or_merge(a.next, b)
-        else:
+        elif a.doc_id > b.doc_id:
             result = b
             result.next = self.or_merge(a, b.next)
+        else:
+            # if both are the same, we want to set to include only one of the postings and set
+            # the next to the smallest of a.next and b.next.
+            tie_broken = False
+            while not tie_broken:
+                a_next = a.next.doc_id if a.next is not None else 0
+                b_next = b.next.doc_id if b.next is not None else 0
+
+                result = a  # does not matter which one of a or b we pick
+                if a_next < b_next:
+                    result.next = self.or_merge(a, a.next)
+                elif a_next >= b_next:
+                    result.next = self.or_merge(a, b.next)
+                else:
+                    result.next = self.or_merge(a, b.next)
+
 
         return result
 
@@ -101,10 +161,71 @@ class PostingList:
 
         return result
 
+    def and_not_merge(self, a, b):
+        head_a = a
+        prev_a = None
+        prev_skip = None
+        while a is not None and a.next is not None:
+            print(f'A: {a}, B: {b}')
+            if a.doc_id == b.doc_id:
+                if prev_a is None:
+                    # this if statement would only apply if the very first postings of both lists match.
+                    head_a = a.next
+
+                # If the doc id's are the same, we manipulate the pointer of the
+                # previous posting to the node after the current. Deciding the previous posting is a bit
+                # tricky because we are using skip pointers, hence the below if-statement.
+
+                # this if statement makes sure no previous skip ptr causes us to delete all
+                # nodes between the skip start to the skip end.
+                if prev_skip:
+                    c = prev_skip
+                    d = prev_skip
+                    while c is not None and c.next is not None:
+                        if c.doc_id == b.doc_id:
+                            d.next = c.next  # set the previous posting's next to the current's next posting
+                            a = d  # continue traversing from node a (= d (= first node before the collision))
+                            break  # we are done with this while-loop within while-loop and break
+                        else:
+                            d = c
+                            c = c.next  # continue traversing and remember last posting with var d.
+                else:
+                    if prev_a is None:
+                        prev_a = a
+                        a = head_a
+                    else:
+                        prev_a.next = a.next  # set the previous posting's next to the current's next posting
+                        a = a.next  # continue the forward traversal of the lists
+
+            elif a.doc_id < b.doc_id:
+                prev_skip = None
+                prev_a = a
+
+                # if this is the case, then we check if we can use the skip ptr or not.
+                if a.skip is not None and b.doc_id - a.skip.doc_id >= 0:
+                    prev_skip = a   # if we use the skip pointer, we remember where we skipped from.
+                                    # "With great power comes great responsibility."
+                    a = a.skip  # traverse forward using the skip pointer
+                else:
+                    a = a.next
+
+            elif a.doc_id > b.doc_id:
+                prev_skip = None
+                prev_a = a
+
+                if b.next is None:
+                    break
+                else:
+                    b = b.next  # traverse forward in b's postings
+
+        return head_a
+
+    """
+    ### LEGACY CODE ###
     def find_first_non_match(self, a, b):
-        # print(f'Comparing {a} with {b}')
+        print(f'Comparing {a} with {b}')
         if b.doc_id > a.doc_id:
-            # print(f'We settle for {a}')
+            print(f'We settle for {a}')
             return a, a.next
         if b.doc_id < a.doc_id:
             if b.next is None:
@@ -114,11 +235,11 @@ class PostingList:
         else:
             return self.find_first_non_match(a.next, b.next)
 
+
     def and_not_merge(self, a, b, prev=None):
-        """
-        The listA And-Not listB operation is the same as taking ListA - {all elements in listB}
-        Time Complexity: O(x+y)
-        """
+        
+        #The listA And-Not listB operation is the same as taking ListA - {all elements in listB}
+        #Time Complexity: O(x+y)
 
         # base cases
         if b is None:
@@ -128,7 +249,7 @@ class PostingList:
 
         result = None
 
-        # print(f'A: {a}, B: {b}')
+        print(f'A: {a}, B: {b}')
 
         if a.doc_id == b.doc_id:
             # if the two postings are the same, we do not set this node, instead we set it to the next
@@ -143,10 +264,11 @@ class PostingList:
 
                 result = prev.next
 
-                # print(f'We found {prev} -> {result} is safe')
-                # print(f'Starting process from {restart_node} again, also {b} and {result}')
+                print(f'We found {prev} -> {result} is safe')
+                print(f'TEST {a.next}')
+                print(f'Starting process from {result} again, also {b} and {result}')
 
-                result.next = self.and_not_merge(restart_node, b, result)
+                result = self.and_not_merge(result, b, prev)
 
             else:
                 # only if this was the very first posting in listA, otherwise we always have a "prev"
@@ -159,14 +281,12 @@ class PostingList:
         elif a.doc_id < b.doc_id:
             if a.next is None:
                 return a
+
             # we only use the skip ptr if it gets us closer to the larger doc_id of b
-
-            result = a
-
             if a.skip is not None and b.doc_id - a.skip.doc_id >= 0:
-                result.next = self.and_not_merge(a.skip, b, a)
+                result = self.and_not_merge(a.skip, b, a)
             else:
-                result.next = self.and_not_merge(a.next, b, a)
+                result = self.and_not_merge(a.next, b, a)
 
         elif a.doc_id > b.doc_id:
             if b.next is None:
@@ -178,6 +298,7 @@ class PostingList:
                 result = self.and_not_merge(a, b.next, a)
 
         return result
+    """
 
     def add_skip_ptr(self, curr_node, skip_distance, curr_idx=0, looking_for_next=False):
 
@@ -227,13 +348,14 @@ def exec_operation(listA, listB, operation):
     if operation == 'AND':
         resulting_postings.head = resulting_postings.and_merge(listA.head, listB.head)
     elif operation == 'OR':
-        resulting_postings.head = resulting_postings.or_merge(listA.head, listB.head)
+        resulting_postings.head = resulting_postings.alt_or_merge(listA.head, listB.head)
     elif operation == 'ANDNOT':
         resulting_postings.head = resulting_postings.and_not_merge(listA.head, listB.head)
     elif operation == 'ORNOT':
         print(f'This operation is not yet implemented')
     elif operation == 'NOT':
-        print(f'This operation is not yet implemented')
+        # the query "NOT term" is executed as all_docs AND NOT term. Costly operation!
+        resulting_postings.head = resulting_postings.and_not_merge(listA.head, listB.head)
     else:
         print(f'Invalid operation: {operation}')
 
@@ -298,7 +420,7 @@ def retrieve_postings_list(dictionary, term_id):
 
 
 def search_term(term_to_search, dictionary):
-    searched_term = normalize_token(term_to_search)
+    searched_term = normalize_token(term_to_search) if term_to_search != 'all_documents_combined' else term_to_search
     try:
         term_id = term_to_term_id[searched_term]
     except KeyError:
@@ -332,34 +454,42 @@ def run_search(dict_file, postings_file, queries_file, results_file):
 
             i = 0
             while i < len(RPN):
+                print(exec_queue)
                 term = RPN[i]
+                print(f'Current term: {term}')
                 if term in OPERATORS:
+                    # this should only be called for first iteration, then we do accumulating runs
                     if prev_list is None:
                         prev_list = search_term(exec_queue.pop(0), dictionary)
 
-                    second_list = search_term(exec_queue.pop(0), dictionary)
-
-                    on_last_index = i + 1 == len(RPN)
                     if term == 'NOT':
+                        on_last_index = i + 1 == len(RPN)
                         if not on_last_index:
                             if RPN[i + 1] == 'AND':
                                 # exec "term1 AND NOT term2"
+                                second_list = search_term(exec_queue.pop(0), dictionary)
                                 prev_list = exec_operation(prev_list, second_list, 'ANDNOT')
                                 i += 1
                             elif RPN[i + 1] == 'OR':
                                 # exec "term1 OR NOT term2"
-                                print("IMPLEMENT OR")
+                                all_docs_list = search_term('all_documents_combined', dictionary)
+                                prev_list = exec_operation(all_docs_list, prev_list, 'NOT')
                             else:
-                                print("I DON'T KNOW")
+                                # exec "NOT term1"
+                                all_docs_list = search_term('all_documents_combined', dictionary)
+                                prev_list = exec_operation(all_docs_list, prev_list, 'NOT')
                         else:
                             # exec "NOT term1"
-                            print("IMPLEMENT PLAIN NOT SEARCH")
-
+                            print("EXECUTING QUERY")
+                            print(f'exec q {exec_queue}')
+                            all_docs_list = search_term('all_documents_combined', dictionary)
+                            prev_list = exec_operation(all_docs_list, prev_list, 'NOT')
                     elif term == 'AND':
+                        second_list = search_term(exec_queue.pop(0), dictionary)
                         prev_list = exec_operation(prev_list, second_list, 'AND')
                     elif term == 'OR':
+                        second_list = search_term(exec_queue.pop(0), dictionary)
                         prev_list = exec_operation(prev_list, second_list, 'OR')
-
                 else:
                     exec_queue.append(term)
                 i += 1
